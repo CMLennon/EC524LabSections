@@ -22,8 +22,6 @@ If you are looking for information about your assignment or the course in genera
 
 Step 1 is to get the data. That's going to come from [kaggle](https://www.kaggle.com/c/house-prices-advanced-regression-techniques/data). You'll need an account, you'll need to register for this competition, and then you'll need to download the data (click download all, in the area below)
 
-![Here's a picture](LabNotes/Screen Shot 2020-01-07 at 1.41.46 PM.png)
-
 Let's check out what data we get. We could do this in R, but let's start with the *data_descriptions* file. This will explain what all of these variables mean, and is a great resource to trying to run a prediction.
 
 Let's start by analyzing what kind of missing data we have... Now we need R. And we need packages. You guys have done this, but I put some inline comments in to help out a bit.
@@ -339,9 +337,8 @@ write_csv(submission_test, "/Users/connor/Downloads/house-prices-advanced-regres
 #This will overwrite whatever filename you choose, so be a little careful.
 ```
 
-Now, you are ready to submit your file, so go to the [kaggle submission page](https://www.kaggle.com/c/house-prices-advanced-regression-techniques/submit) and then drag your newly created csv file to the box that looks like...
+Now, you are ready to submit your file, so go to the [kaggle submission page](https://www.kaggle.com/c/house-prices-advanced-regression-techniques/submit) and then drag your newly created csv file to the box.
 
-![Here on the page](LabNotes/Screen Shot 2020-01-07 at 2.24.54 PM.png)
 You'll notice you get 10 submissions every two hours. I assume that's enough, but let us know if you have a problem.
 
 Now, I'll put Ed's code using data.table below so you can see how he did it using data.tables.
