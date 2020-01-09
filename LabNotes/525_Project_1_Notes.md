@@ -1,0 +1,441 @@
+---
+title: "Kaggle Contest Notes"
+author:
+  name: Connor Lennon | University of Oregon
+date: EC 524  #"07 January 2020"
+output: 
+  html_document:
+    theme: flatly
+    highlight: haddock 
+    # code_folding: show
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+    keep_md: true
+---
+
+## Kaggle Competition
+
+Welcome to the term! Let's get stuck-in. We did MOST of this work in class, but I wanted a document for you guys to reference. I'm going to do WAY more work than you need to, but just in case I wanted to show you what to do.
+
+If you are looking for information about your assignment or the course in general, I advise you go check out [Ed Rubins Github page](https://github.com/edrubin/EC524W20) and also look at the specific assignment page where your questions are [here](https://github.com/edrubin/EC524W20/tree/master/projects/kaggle-house-prices)
+
+Step 1 is to get the data. That's going to come from [kaggle](https://www.kaggle.com/c/house-prices-advanced-regression-techniques/data). You'll need an account, you'll need to register for this competition, and then you'll need to download the data (click download all, in the area below)
+
+![Here's a picture](/Users/connor/Desktop/Screen Shot 2020-01-07 at 1.41.46 PM.png)
+
+Let's check out what data we get. We could do this in R, but let's start with the *data_descriptions* file. This will explain what all of these variables mean, and is a great resource to trying to run a prediction.
+
+Let's start by analyzing what kind of missing data we have... Now we need R. And we need packages. You guys have done this, but I put some inline comments in to help out a bit.
+
+
+```r
+#load training data, add 'test column', transform prices to logged SalePrices
+
+#In general, we will want to use 'pacman' to load our packages. It's really nice, 
+#and streamlines a ton of work for us.
+#install.packages('pacman') #if you haven't used pacman before, you need to install it
+library(pacman) #add pacman to your workspace
+p_load(tidyverse, ggplot2, naniar, tidyimpute, tidymodels, magrittr) 
+#loading packages with pacman is super easy. 
+#Just use p_load(package_name1, package_name2) etc.
+
+#now you need to load your data. I just left it in my downloads folder, 
+#but you can get your data wherever you decide to leave it. 
+train_df <- read_csv('/Users/connor/Downloads/house-prices-advanced-regression-techniques/train.csv')
+```
+
+```
+## Parsed with column specification:
+## cols(
+##   .default = col_character(),
+##   Id = col_double(),
+##   MSSubClass = col_double(),
+##   LotFrontage = col_double(),
+##   LotArea = col_double(),
+##   OverallQual = col_double(),
+##   OverallCond = col_double(),
+##   YearBuilt = col_double(),
+##   YearRemodAdd = col_double(),
+##   MasVnrArea = col_double(),
+##   BsmtFinSF1 = col_double(),
+##   BsmtFinSF2 = col_double(),
+##   BsmtUnfSF = col_double(),
+##   TotalBsmtSF = col_double(),
+##   `1stFlrSF` = col_double(),
+##   `2ndFlrSF` = col_double(),
+##   LowQualFinSF = col_double(),
+##   GrLivArea = col_double(),
+##   BsmtFullBath = col_double(),
+##   BsmtHalfBath = col_double(),
+##   FullBath = col_double()
+##   # ... with 18 more columns
+## )
+```
+
+```
+## See spec(...) for full column specifications.
+```
+
+```r
+train_df <-train_df %>% mutate(test = 0, SalePrice = log(SalePrice))
+
+#load test data, add 'test' column, add empty SalePrice col.
+test_df <- read_csv('/Users/connor/Downloads/house-prices-advanced-regression-techniques/test.csv')
+```
+
+```
+## Parsed with column specification:
+## cols(
+##   .default = col_character(),
+##   Id = col_double(),
+##   MSSubClass = col_double(),
+##   LotFrontage = col_double(),
+##   LotArea = col_double(),
+##   OverallQual = col_double(),
+##   OverallCond = col_double(),
+##   YearBuilt = col_double(),
+##   YearRemodAdd = col_double(),
+##   MasVnrArea = col_double(),
+##   BsmtFinSF1 = col_double(),
+##   BsmtFinSF2 = col_double(),
+##   BsmtUnfSF = col_double(),
+##   TotalBsmtSF = col_double(),
+##   `1stFlrSF` = col_double(),
+##   `2ndFlrSF` = col_double(),
+##   LowQualFinSF = col_double(),
+##   GrLivArea = col_double(),
+##   BsmtFullBath = col_double(),
+##   BsmtHalfBath = col_double(),
+##   FullBath = col_double()
+##   # ... with 17 more columns
+## )
+## See spec(...) for full column specifications.
+```
+
+```r
+test_df <- test_df %>% mutate(test = 1, SalePrice = NaN) 
+#we need to create an empty sale-price column so the dataframes match in size.
+
+#glue them together-
+fulldf <- rbind(train_df, test_df)
+
+#We can use the naniar package to visualize missingness in our 
+#data in a super intuitive way, with the gg_miss_upset() function.
+missing_vals <- fulldf %>% select_if(~ any(is.na(.)))
+missing_vals %>% gg_miss_upset(nsets = 12)
+```
+
+![](525_Project_1_Notes_files/figure-html/missing_data-1.png)<!-- -->
+
+Now, we need to replace some of our values. Let's do this the hard way as a warm-up, and then move on.
+
+
+```r
+fulldf$PoolQC <- fulldf$PoolQC %>% replace_na("None")
+fulldf$MiscFeature <- fulldf$MiscFeature %>% replace_na("None")
+fulldf$Alley <- fulldf$Alley %>% replace_na("None")
+fulldf$Fence <- fulldf$Fence %>% replace_na("None")
+fulldf$FireplaceQu <- fulldf$FireplaceQu %>% replace_na("None")
+
+#ok.. Whatr about lot frontage? We have missing values, but maybe we can use information about 
+#nearby houses to "impute" what we would expect for a similar house. Let's do that.
+fulldf <-fulldf %>% 
+  group_by(Neighborhood) %>% 
+  mutate(LotFrontage=ifelse(is.na(LotFrontage),median(LotFrontage,na.rm=TRUE),LotFrontage)) %>% 
+  ungroup()
+# I would like to add a time trend. Why? Because I feel like it. Here's how I thought to do this. 
+
+#can you come up with a different way?
+
+#the %<>% assigns the dataframe you create to the name of the dataframe you started with, that is, %>% passes your dataframe into a fcn, %<>% will change the dataframe entirely.
+
+fulldf %<>% mutate(time = 12*YrSold + MoSold) %>% mutate(time = time - min(time, na.rm = TRUE))
+```
+
+Now let's speed things up for ourselves - 
+
+
+```r
+#These variables are really factors, not numeric. So let's change them. 
+#Factors will treat 1, 2, 3 etc. as individual dummy variables.
+factcols = c('MSSubClass', 'OverallCond', 'YrSold', 
+             'MoSold')
+fulldf[factcols] <- lapply(fulldf[factcols], factor)
+
+#The following columns' missing observations are likely to be 
+#replacable with 0 because 'NA' really means no basement or no garage
+bsmtcols = c('BsmtFinSF1', 'BsmtFinSF2', 'BsmtUnfSF', 'TotalBsmtSF', 
+             'BsmtFullBath', 'BsmtHalfBath', 'GarageYrBlt', 'GarageArea', 'GarageCars', 'MasVnrArea')
+
+#this will replace all NA values with 0.
+fulldf[bsmtcols] %<>% replace(is.na(.), 0)
+
+
+#for the same reasons as above, we can add some clarity by replacing the following observations with 0
+nonecols = c('GarageType', 'GarageFinish', 'GarageQual', 'GarageCond', 'BsmtQual', 
+             'BsmtCond', 'BsmtExposure', 'BsmtFinType1', 'BsmtFinType2', 'MasVnrType', 'MSSubClass')
+
+fulldf[nonecols] %<>% replace(is.na(.), "None")
+
+#These are more difficult. Because we don't know much about the 
+#following variables, we can replace these NAs with the modal observed outcome. 
+#You should think carefully about doing this, what are you assuming?
+
+modecols = c('MSZoning', 'Electrical','KitchenQual', 'Exterior1st', 'Exterior2nd','SaleType')
+fulldf[,c(modecols)] %<>% impute_most_freq(modecols)
+
+#the documentation for 'Functional' says NA == "Typical" so we can replace with 'Typ'
+fulldf$Functional %<>% replace_na("Typ")
+
+#Let's 'engineer' a useful variable. Here, we can build a Total square footage variable to use for prediction.
+fulldf$TotalSF <- fulldf$TotalBsmtSF + fulldf$`1stFlrSF` + fulldf$`2ndFlrSF`
+```
+
+
+## Making Predictions
+Now we need to make our predictions
+
+
+```r
+#Now, we need to break our datasets back up again. 
+#Also, those variables that start with a number are going to give R headaches, 
+#so let's change their names to something we can read but so can the computer.
+
+traindf <- subset(fulldf, test ==0)
+
+#renaming columns
+colnames(traindf)[which(names(traindf) %in% c('1stFlrSF', '2ndFlrSF', '3SsnPorch'))] <- c('FirstFlrSF', 'SecondFlrSF', 'ThrSsnPorch')
+#drop test (it's meaningless, and utilities because there is zero variation in it)
+traindf %<>% select(-c('test','Utilities'))
+
+#now, we repeat above steps for test data.
+testdf <- subset(fulldf, test ==1)
+testdf %<>% select(-c('test', 'Utilities'))
+colnames(testdf)[which(names(testdf) %in% c('1stFlrSF', '2ndFlrSF', '3SsnPorch'))] <- c('FirstFlrSF', 'SecondFlrSF', 'ThrSsnPorch')
+
+#Now, you have to come up with a good model for prediction! How should you do that? Think a bit about your approach here.
+
+
+#I am going to use Ed's model, which is a 'Random Forest.' You'll learn about these later, 
+#but for now you can ignore this. Just come up with a model using the lm() function and forecast away!
+
+#A nice function to find variables not in a group
+`%nin%` = Negate(`%in%`)
+
+ model_trained = rand_forest(mode = "regression", mtry = 24, trees = 10000) %>%
+    set_engine("ranger", seed = 12345, num.threads = 10, verbose = TRUE) %>%
+    fit_xy(
+      y = traindf$SalePrice,
+      x = traindf[which(names(traindf) %nin% c('ID', 'SalePrice'))]
+    )
+ 
+#assign predictions to a new variable
+new_predictions = predict(
+    model_trained,
+    new_data = testdf
+  )
+
+#Maybe, however, you are interested in seeing how your model performs 'out of sample.' Let's do that.
+
+#we'll start by splitting the data in half. We can use the 
+#sample function this way: sample(dataframe, number of rows to sample)
+
+#sampling vector
+s <- sample(nrow(traindf), length(traindf)/2)
+minitrain = traindf[s,]
+minitest = traindf[-s,]
+
+model_minitrain = rand_forest(mode = "regression", mtry = 24, trees = 10000) %>%
+    set_engine("ranger", seed = 12345, num.threads = 10, verbose = TRUE) %>%
+    fit_xy(
+      y = minitrain$SalePrice,
+      x = minitrain[which(names(minitrain) %nin% c('ID', 'SalePrice'))]
+    )
+
+#now predict on our excluded subsample. For you, you'd use predict(my_reg, minitest)
+mini_predictions = predict(
+    model_minitrain,
+    new_data = minitest
+  )
+mini_predictions
+```
+
+```
+## # A tibble: 1,419 x 1
+##    .pred
+##    <dbl>
+##  1  12.3
+##  2  12.0
+##  3  12.3
+##  4  12.0
+##  5  12.6
+##  6  12.0
+##  7  12.6
+##  8  12.3
+##  9  11.8
+## 10  11.8
+## # … with 1,409 more rows
+```
+
+```r
+#then, we may want to look at MSE. We will compare the differences from our test data and our predictions
+
+err = exp(mini_predictions) - exp(minitest$SalePrice)
+errsq = err^2
+summary(errsq)
+```
+
+```
+##      .pred          
+##  Min.   :0.000e+00  
+##  1st Qu.:6.273e+07  
+##  Median :2.939e+08  
+##  Mean   :1.454e+09  
+##  3rd Qu.:1.052e+09  
+##  Max.   :1.521e+11
+```
+
+```r
+#it's not great! How do we get the mean?
+
+#take the mean of the sum... and you have your MSE for housing data
+lapply(errsq, mean, na.rm = TRUE)
+```
+
+```
+## $.pred
+## [1] 1454200617
+```
+
+```r
+#now, you need to build a dataframe to hold onto the 'ID' variable and then another one. 
+#The random forest is overwriting my column name but 
+#I don't like that so I'm going to overwrite the column names.
+submission_test = data.frame(
+  Id = testdf$Id,
+  SalePrice = new_predictions
+)
+
+#overwrite the column names
+colnames(submission_test) = c('Id','SalePrice')
+
+#now we can look at this
+head(submission_test)
+```
+
+```
+##     Id SalePrice
+## 1 1461  11.69984
+## 2 1462  11.95180
+## 3 1463  12.09227
+## 4 1464  12.11927
+## 5 1465  12.17882
+## 6 1466  12.10660
+```
+
+```r
+write_csv(submission_test, "/Users/connor/Downloads/house-prices-advanced-regression-techniques/a_submission.csv")
+#This will overwrite whatever filename you choose, so be a little careful.
+```
+
+Now, you are ready to submit your file, so go to the [kaggle submission page](https://www.kaggle.com/c/house-prices-advanced-regression-techniques/submit) and then drag your newly created csv file to the box that looks like...
+
+![Here on the page](/Users/connor/Desktop/Screen Shot 2020-01-07 at 2.24.54 PM.png)
+You'll notice you get 10 submissions every two hours. I assume that's enough, but let us know if you have a problem.
+
+Now, I'll put Ed's code using data.table below so you can see how he did it using data.tables.
+
+## Ed's Beautiful Code using Data Tables
+
+
+```r
+# Setup ----------------------------------------------------------------------------------
+  # Options
+  options(stringsAsFactors = F)
+  # Packages
+  library(pacman)
+  # devtools::install_github("tidymodels/parsnip")
+  p_load(
+    tidyverse, data.table, lubridate,
+    ranger, parsnip,
+    magrittr, here
+  )
+
+# Load data ------------------------------------------------------------------------------
+  # Training data
+  # you can use the 'here' function too that ed uses on his github - this is the fast and dirty approach.
+  train_dt = '/Users/connor/Downloads/house-prices-advanced-regression-techniques/train.csv' %>% fread()
+  # Testing data
+  test_dt = "/Users/connor/Downloads/house-prices-advanced-regression-techniques/test.csv" %>% fread()
+
+# Data work ------------------------------------------------------------------------------
+  # Replace "NA" in alley with "No"
+  train_dt[is.na(Alley), Alley := "No"]
+  test_dt[is.na(Alley), Alley := "No"]
+  # Same with fence
+  train_dt[is.na(Fence), Fence := "No"]
+  test_dt[is.na(Fence), Fence := "No"]
+  # and MSZoning
+  train_dt[is.na(MSZoning), MSZoning := "No"]
+  test_dt[is.na(MSZoning), MSZoning := "No"]
+  # and Utilities
+  train_dt[is.na(Utilities), Utilities := "No"]
+  test_dt[is.na(Utilities), Utilities := "No"]
+  # and MiscFeature
+  train_dt[is.na(MiscFeature), MiscFeature := "No"]
+  test_dt[is.na(MiscFeature), MiscFeature := "No"]
+  # and LotFrontage
+  train_dt[is.na(LotFrontage), LotFrontage := 0]
+  test_dt[is.na(LotFrontage), LotFrontage := 0]
+  # and MasVnrArea
+  train_dt[is.na(MasVnrArea), MasVnrArea := 0]
+  test_dt[is.na(MasVnrArea), MasVnrArea := 0]
+  # and MasVnrType
+  train_dt[is.na(MasVnrType), MasVnrType := "None"]
+  test_dt[is.na(MasVnrType), MasVnrType := "None"]
+  # and SaleType
+  train_dt[is.na(SaleType), SaleType := "?"]
+  test_dt[is.na(SaleType), SaleType := "?"]
+  # and Exterior1st
+  train_dt[is.na(Exterior1st), Exterior1st := "?"]
+  test_dt[is.na(Exterior1st), Exterior1st := "?"]
+  # and Exterior2nd
+  train_dt[is.na(Exterior2nd), Exterior2nd := "?"]
+  test_dt[is.na(Exterior2nd), Exterior2nd := "?"]
+  # and KitchenQual
+  train_dt[is.na(KitchenQual), KitchenQual := "?"]
+  test_dt[is.na(KitchenQual), KitchenQual := "?"]
+  # Drop PoolQC
+  train_dt[, PoolQC := NULL]
+  test_dt[, PoolQC := NULL]
+  # Drop FireplaceQu
+  train_dt[, FireplaceQu := NULL]
+  test_dt[, FireplaceQu := NULL]
+
+# Train a model --------------------------------------------------------------------------
+  # Train the model
+  model_trained = rand_forest(mode = "regression", mtry = 12, trees = 10000) %>%
+    set_engine("ranger", seed = 12345, num.threads = 10) %>%
+    fit_xy(
+      y = train_dt[,SalePrice],
+      x = train_dt[,-c("Id", "SalePrice")] %>%
+        select(MSSubClass:Foundation, KitchenQual, PoolArea:SaleCondition)
+    )
+  # Predict onto testing data
+  new_predictions = predict(
+    model_trained,
+    new_data = test_dt
+  )
+  # Data to submit
+# NOTE: Names and capitalization matter
+  to_submit = data.frame(
+    Id = test_dt$Id,
+    SalePrice = new_predictions$.pred
+  )
+  # File to submit
+  write_csv(
+    x = to_submit,
+    path = here("data", "to-submit-001.csv")
+  )
+```
